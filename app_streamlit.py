@@ -2,6 +2,7 @@ import io, re
 import pandas as pd
 from datetime import datetime
 import streamlit as st
+import json, os
 
 # =========================
 # Helpers gerais
@@ -185,6 +186,81 @@ with tab1:
                            data=xls_bytes.getvalue(),
                            file_name="Correcoes_Imediatas.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # ===== IA: Resumo Executivo + Plano de Ação =====
+        st.markdown("---")
+        st.subheader("🧠 Analisar com IA")
+        if st.button("Gerar Resumo Executivo (IA)"):
+            meta = {"competencia": competencia}
+            findings_pack = all_findings  # [(fonte, df)]
+            resultado = ia_priorizar_e_sugerir(findings_pack, meta)
+
+            # Mostrar resumo
+            st.markdown(resultado["resumo_md"])
+
+            # Mostrar ações
+            if resultado["acoes"] is not None and not resultado["acoes"].empty:
+                st.write("**Plano de Ação Priorizado**")
+                st.dataframe(resultado["acoes"])
+            else:
+                st.info("Sem ações estruturadas retornadas para este conjunto.")
+
+            # Downloads: Markdown e Excel (ações)
+            md_bytes = io.BytesIO(resultado["resumo_md"].encode("utf-8"))
+            st.download_button(
+                "⬇️ Baixar Resumo_IA.md",
+                data=md_bytes.getvalue(),
+                file_name="Resumo_IA.md",
+                mime="text/markdown"
+            )
+            if resultado["acoes"] is not None and not resultado["acoes"].empty:
+                out_xls = io.BytesIO()
+                with pd.ExcelWriter(out_xls, engine="openpyxl") as w:
+                    resultado["acoes"].to_excel(w, sheet_name="Plano_de_Acao", index=False)
+                    # Guardar citacoes (se houver)
+                    pd.DataFrame(resultado.get("citacoes", [])).to_excel(w, sheet_name="Citacoes", index=False)
+                st.download_button(
+                    "⬇️ Baixar Plano_de_Acao.xlsx",
+                    data=out_xls.getvalue(),
+                    file_name="Plano_de_Acao.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+            st.success("Análise de IA concluída.")
+
+        except Exception as e:
+            # Cai para fallback
+            pass
+
+    # ===== Fallback (sem IA): sumarização determinística =====
+    vc = view["regra_id"].value_counts().head(5).to_dict() if "regra_id" in view.columns else {}
+    perdas = view["impacto_estimado_RS"].fillna(0).sum() if "impacto_estimado_RS" in view.columns else 0
+    resumo = f"""### Resumo Executivo (Automático)
+- Competência: **{meta.get('competencia','(não informada)')}**
+- Top regras: **{vc}**
+- Estimativa de impacto (somatório disponível): **R$ {perdas:,.2f}**
+- Próximas ações:
+  1. Corrigir campos obrigatórios (CID/TUSS) nas guias pendentes.
+  2. Conferir divergências **vl_total ≠ qtd × vl_unit** nas guias sinalizadas.
+  3. Revisar compatibilidade clínica (CID ↔ procedimento) usando SIGTAP/TUSS vigente.
+  4. Anexar laudos obrigatórios e reprocessar.
+  5. Reprocessar lote e monitorar **clean-claim** no próximo ciclo.
+"""
+    acoes = []
+    # Seleciona até 7 regras mais frequentes para o plano
+    for i, (reg, count) in enumerate(vc.items(), start=1):
+        acoes.append({
+            "prioridade": "P1" if i <= 3 else "P2",
+            "regra_id": reg,
+            "gravidade": "alta" if i <= 3 else "media",
+            "fonte": "",
+            "registro_id": "",
+            "descricao": f"Tratar {reg} (ocorrências: {count})",
+            "como_corrigir": "Corrigir registros sinalizados e revalidar.",
+            "impacto_estimado_RS": None,
+            "responsavel_sugerido": "Faturamento",
+            "prazo_dias": 5 if i <= 3 else 10
+        })
+    return {"resumo_md": resumo, "acoes": pd.DataFrame(acoes), "citacoes": []}
 
 # ---- TAB 2: Painel SUS
 with tab2:
@@ -356,3 +432,136 @@ with tab4:
                            data=out.getvalue(),
                            file_name="consolidacao_SIGTAP_julho2025.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+def ia_priorizar_e_sugerir(findings_df_list, meta):
+    """
+    findings_df_list: lista de DataFrames [(fonte, df_findings)]
+    meta: dict com {"competencia": "...", ...}
+    Retorna: dict {"resumo_md": str, "acoes": DataFrame, "citacoes": list[dict]}
+    """
+    # Consolidar achados em uma tabela única (até 300 linhas para caber no contexto)
+    rows = []
+    for fonte, df in findings_df_list:
+        if df is None or df.empty:
+            continue
+        tmp = df.copy()
+        tmp["fonte"] = fonte
+        rows.append(tmp)
+    if not rows:
+        # Sem achados: devolve mensagem simples
+        return {
+            "resumo_md": "### Resumo Executivo (IA)\n\nNenhum achado relevante encontrado.",
+            "acoes": pd.DataFrame(columns=["prioridade","regra_id","gravidade","fonte","registro_id","descricao","como_corrigir","impacto_estimado_RS"]),
+            "citacoes": []
+        }
+    allf = pd.concat(rows, ignore_index=True)
+    # Limitar o volume para o LLM
+    view = allf.head(300).copy()
+
+    # ===== Tentativa com IA (OpenAI) =====
+    api_key = os.getenv("OPENAI_API_KEY", None)
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+            api_key = st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        pass
+
+    prompt_sistema = (
+        "Você é um analista sênior de faturamento hospitalar (SUS + Privado). "
+        "Sua missão: priorizar riscos de glosa, estimar impacto financeiro, explicar a causa raiz "
+        "e propor ações corretivas objetivas. Sempre traga saídas concisas e acionáveis."
+    )
+
+    prompt_usuario = {
+        "meta": meta,
+        "campos_df": list(view.columns),
+        "amostra_achados": view.fillna("").to_dict(orient="records"),
+        "formato_esperado": {
+            "resumo_md": "Markdown com: Top-5 causas, perda evitável (estimativa), plano de 7–10 ações priorizadas, ganhos rápidos.",
+            "acoes": [
+                {
+                    "prioridade": "P1|P2|P3",
+                    "regra_id": "ex: TISS_FINANCEIRO",
+                    "gravidade": "alta|media|baixa",
+                    "fonte": "TISS|AIH|BPA|APAC",
+                    "descricao": "o que está errado",
+                    "como_corrigir": "passo a passo curto",
+                    "impacto_estimado_RS": "número aproximado",
+                    "responsavel_sugerido": "Faturamento|Médico|TI|Auditoria",
+                    "prazo_dias":  "int"
+                }
+            ],
+            "citacoes": [
+                {
+                    "tipo": "regra|contrato|tabela",
+                    "referencia": "ex: SIGTAP 202507, item XYZ; Contrato Operadora A, cláusula 5.2"
+                }
+            ]
+        }
+    }
+
+    if api_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            # Modelo “capaz de estruturar” – ajuste se necessário
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role":"system","content": prompt_sistema},
+                    {"role":"user","content": json.dumps(prompt_usuario, ensure_ascii=False)}
+                ],
+                temperature=0.2
+            )
+            txt = resp.choices[0].message.content or ""
+            # Heurística: tentar encontrar um bloco JSON dentro da resposta; se não houver, usar inteiro como resumo
+            # e gerar plano mínimo.
+            try:
+                start = txt.find("{")
+                end = txt.rfind("}")
+                payload = json.loads(txt[start:end+1])
+            except Exception:
+                payload = {"resumo_md": txt, "acoes": [], "citacoes": []}
+
+            acoes_df = pd.DataFrame(payload.get("acoes", [])) if payload.get("acoes") else pd.DataFrame(columns=[
+                "prioridade","regra_id","gravidade","fonte","registro_id","descricao","como_corrigir","impacto_estimado_RS","responsavel_sugerido","prazo_dias"
+            ])
+            return {
+                "resumo_md": payload.get("resumo_md", txt),
+                "acoes": acoes_df,
+                "citacoes": payload.get("citacoes", [])
+            }
+        except Exception as e:
+            # Cai para fallback
+            pass
+
+    # ===== Fallback (sem IA): sumarização determinística =====
+    vc = view["regra_id"].value_counts().head(5).to_dict() if "regra_id" in view.columns else {}
+    perdas = view["impacto_estimado_RS"].fillna(0).sum() if "impacto_estimado_RS" in view.columns else 0
+    resumo = f"""### Resumo Executivo (Automático)
+- Competência: **{meta.get('competencia','(não informada)')}**
+- Top regras: **{vc}**
+- Estimativa de impacto (somatório disponível): **R$ {perdas:,.2f}**
+- Próximas ações:
+  1. Corrigir campos obrigatórios (CID/TUSS) nas guias pendentes.
+  2. Conferir divergências **vl_total ≠ qtd × vl_unit** nas guias sinalizadas.
+  3. Revisar compatibilidade clínica (CID ↔ procedimento) usando SIGTAP/TUSS vigente.
+  4. Anexar laudos obrigatórios e reprocessar.
+  5. Reprocessar lote e monitorar **clean-claim** no próximo ciclo.
+"""
+    acoes = []
+    # Seleciona até 7 regras mais frequentes para o plano
+    for i, (reg, count) in enumerate(vc.items(), start=1):
+        acoes.append({
+            "prioridade": "P1" if i <= 3 else "P2",
+            "regra_id": reg,
+            "gravidade": "alta" if i <= 3 else "media",
+            "fonte": "",
+            "registro_id": "",
+            "descricao": f"Tratar {reg} (ocorrências: {count})",
+            "como_corrigir": "Corrigir registros sinalizados e revalidar.",
+            "impacto_estimado_RS": None,
+            "responsavel_sugerido": "Faturamento",
+            "prazo_dias": 5 if i <= 3 else 10
+        })
+    return {"resumo_md": resumo, "acoes": pd.DataFrame(acoes), "citacoes": []}
