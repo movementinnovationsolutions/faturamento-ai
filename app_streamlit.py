@@ -1,7 +1,10 @@
 # =========================
 # app_streamlit.py — versão completa revisada
 # =========================
-import io, re, json, os
+import io
+import re
+import os
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -21,7 +24,8 @@ PROC_10D = re.compile(r"(?<!\d)(\d{10})(?!\d)")
 DATE_8D = re.compile(r"\b(\d{8})\b")
 
 
-def try_read_text(file):
+def try_read_text(file) -> str:
+"""Lê binário e decodifica como texto."""
 try:
 return file.getvalue().decode("latin-1", errors="ignore")
 except Exception:
@@ -30,6 +34,7 @@ return file.getvalue().decode("utf-8", errors="ignore")
 
 
 def detect_jul_2025(text: str) -> bool:
+"""Retorna True se detectar datas de julho/2025 (formatos 8 dígitos)."""
 for token in DATE_8D.findall(text):
 for fmt in ("%d%m%Y", "%Y%m%d"):
 try:
@@ -50,28 +55,6 @@ try:
 return round(float(x), 2)
 except Exception:
 return None
-
-
-def read_csv_safe(f):
-"""Lê CSV e cai para Excel se necessário."""
-if not f:
-return None
-try:
-return pd.read_csv(f)
-except Exception:
-f.seek(0)
-return pd.read_excel(f)
-
-
-def read_any(f):
-"""Lê CSV; se falhar, tenta XLSX (para TISS/contratos)."""
-if not f:
-return None
-try:
-return pd.read_csv(f)
-except Exception:
-f.seek(0)
-return pd.read_excel(f)
 
 
 # =========================
@@ -160,10 +143,7 @@ resp = client.chat.completions.create(
 model="gpt-4o-mini",
 messages=[
 {"role": "system", "content": prompt_sistema},
-{
-"role": "user",
-"content": json.dumps(prompt_usuario, ensure_ascii=False),
-},
+{"role": "user", "content": json.dumps(prompt_usuario, ensure_ascii=False)},
 ],
 temperature=0.2,
 )
@@ -197,9 +177,7 @@ columns=[
 )
 )
 return {
-"resumo_md": payload.get(
-"resumo_md", txt if txt else "### Resumo Executivo (IA)\n\nSem texto."
-),
+"resumo_md": payload.get("resumo_md", txt if txt else "### Resumo Executivo (IA)\n\nSem texto."),
 "acoes": acoes_df,
 "citacoes": payload.get("citacoes", []),
 }
@@ -208,16 +186,8 @@ except Exception:
 pass
 
 # ===== Fallback determinístico =====
-vc = (
-view["regra_id"].value_counts().head(5).to_dict()
-if "regra_id" in view.columns
-else {}
-)
-perdas = (
-view["impacto_estimado_RS"].fillna(0).sum()
-if "impacto_estimado_RS" in view.columns
-else 0.0
-)
+vc = view["regra_id"].value_counts().head(5).to_dict() if "regra_id" in view.columns else {}
+perdas = view["impacto_estimado_RS"].fillna(0).sum() if "impacto_estimado_RS" in view.columns else 0.0
 resumo = f"""### Resumo Executivo (Automático)
 - Competência: **{meta.get('competencia','(não informada)')}**
 - Top regras: **{vc}**
@@ -256,16 +226,8 @@ try:
 aps_total = 0 if aps_df is None or aps_df.empty else aps_df.shape[0]
 sia_total = 0 if sia_df is None or sia_df.empty else sia_df.shape[0]
 sih_total = 0 if sih_df is None or sih_df.empty else sih_df.shape[0]
-n_prof = (
-0
-if cnes_prof_df is None or cnes_prof_df.empty
-else cnes_prof_df.get("CBO", pd.Series()).nunique()
-)
-n_eqp = (
-0
-if cnes_eqp_df is None or cnes_eqp_df.empty
-else cnes_eqp_df.get("EQUIPAMENTO", pd.Series()).nunique()
-)
+n_prof = 0 if cnes_prof_df is None or cnes_prof_df.empty else cnes_prof_df.get("CBO", pd.Series()).nunique()
+n_eqp = 0 if cnes_eqp_df is None or cnes_eqp_df.empty else cnes_eqp_df.get("EQUIPAMENTO", pd.Series()).nunique()
 except Exception:
 aps_total = sia_total = sih_total = n_prof = n_eqp = 0
 
@@ -400,11 +362,7 @@ como_corrigir="Preencher código TUSS vigente.",
 impacto_estimado_RS=None,
 )
 )
-if not (
-pd.isna(df.at[i, "qtd"])
-or pd.isna(df.at[i, "vl_unit"])
-or pd.isna(df.at[i, "vl_total"])
-):
+if not (pd.isna(df.at[i, "qtd"]) or pd.isna(df.at[i, "vl_unit"]) or pd.isna(df.at[i, "vl_total"])):
 calc = df.at[i, "qtd"] * df.at[i, "vl_unit"]
 if abs(calc - df.at[i, "vl_total"]) > 0.01:
 findings.append(
@@ -482,9 +440,7 @@ return pd.DataFrame(findings)
 # =========================
 # TABS
 # =========================
-tab1, tab2, tab3, tab4 = st.tabs(
-["🔎 Auditoria", "🏥 Painel SUS", "🏷️ Painel Privado", "📚 SIGTAP (Jul/2025)"]
-)
+tab1, tab2, tab3, tab4 = st.tabs(["🔎 Auditoria", "🏥 Painel SUS", "🏷️ Painel Privado", "📚 SIGTAP (Jul/2025)"])
 
 # ---- TAB 1: Auditoria
 with tab1:
@@ -497,9 +453,7 @@ st.session_state["competencia_atual"] = None
 with st.sidebar:
 st.header("Parâmetros da Auditoria")
 competencia = st.text_input("Competência (AAAAMM)", value="202507")
-n_files = st.number_input(
-"Quantos arquivos você vai enviar?", min_value=1, max_value=10, value=1, step=1
-)
+n_files = st.number_input("Quantos arquivos você vai enviar?", min_value=1, max_value=10, value=1, step=1)
 
 uploaded = []
 for i in range(int(n_files)):
@@ -507,9 +461,7 @@ col1, col2 = st.columns([3, 2])
 with col1:
 f = st.file_uploader(f"Arquivo {i+1}", type=None, key=f"fu_{i}")
 with col2:
-tipo = st.selectbox(
-"Tipo", ["AIH_fixo", "BPA_fixo", "APAC_fixo", "TISS_CSV"], key=f"tipo_{i}"
-)
+tipo = st.selectbox("Tipo", ["AIH_fixo", "BPA_fixo", "APAC_fixo", "TISS_CSV"], key=f"tipo_{i}")
 uploaded.append((f, tipo))
 
 if st.button("Rodar Auditoria", key="rodar_aud"):
@@ -526,32 +478,25 @@ df = pd.read_csv(f)
 except Exception:
 f.seek(0)
 df = pd.read_excel(f)
-st.info(
-"Esperado: numero_guia, cid10, tuss_codigo, qtd, vl_unit, vl_total ..."
-)
+st.info("Esperado: numero_guia, cid10, tuss_codigo, qtd, vl_unit, vl_total ...")
 findings = validate_tiss_csv(df, "TISS")
 if not findings.empty:
-st.dataframe(findings)
+st.dataframe(findings, use_container_width=True)
 all_findings.append(("TISS", findings))
 st.write("Prévia TISS (200 linhas):")
-st.dataframe(df.head(200).copy())
+st.dataframe(df.head(200).copy(), use_container_width=True)
 else:
 text = try_read_text(f)
 findings = validate_fixed_lines(text, tipo)
 if not findings.empty:
-st.dataframe(findings)
+st.dataframe(findings, use_container_width=True)
 all_findings.append((tipo, findings))
 lines = text.splitlines()
 for idx, ln in enumerate(lines[:500], start=1):
 codes = extract_codes(ln)
 if codes:
 det_rows.append(
-dict(
-arquivo=fname,
-line_idx=idx,
-codes_10d=";".join(codes),
-n_codes=len(codes),
-)
+dict(arquivo=fname, line_idx=idx, codes_10d=";".join(codes), n_codes=len(codes))
 )
 
 # — Excel de saída
@@ -573,21 +518,21 @@ columns=[
 )
 )
 df_tmp.to_excel(writer, sheet_name=f"{fonte}_erros", index=False)
+
 det_df = (
 pd.DataFrame(det_rows)
 if det_rows
 else pd.DataFrame(columns=["arquivo", "line_idx", "codes_10d", "n_codes"])
 )
 det_df.to_excel(writer, sheet_name="Detalhe_codigos", index=False)
+
 resumo = []
 for fonte, df_f in all_findings:
 if df_f is None or df_f.empty:
 continue
 top = df_f["regra_id"].value_counts().head(5).to_dict()
 resumo.append(dict(fonte=fonte, top5_regra_ids=str(top)))
-pd.DataFrame(resumo).to_excel(
-writer, sheet_name="Resumo_executivo", index=False
-)
+pd.DataFrame(resumo).to_excel(writer, sheet_name="Resumo_executivo", index=False)
 
 st.download_button(
 "⬇️ Baixar Correcoes_Imediatas.xlsx",
@@ -615,13 +560,11 @@ resultado = ia_priorizar_e_sugerir(st.session_state["findings_pack"], meta)
 st.markdown(resultado["resumo_md"])
 if resultado["acoes"] is not None and not resultado["acoes"].empty:
 st.write("**Plano de Ação Priorizado**")
-st.dataframe(resultado["acoes"])
+st.dataframe(resultado["acoes"], use_container_width=True)
 out_xls = io.BytesIO()
 with pd.ExcelWriter(out_xls, engine="openpyxl") as w:
 resultado["acoes"].to_excel(w, sheet_name="Plano_de_Acao", index=False)
-pd.DataFrame(resultado.get("citacoes", [])).to_excel(
-w, sheet_name="Citacoes", index=False
-)
+pd.DataFrame(resultado.get("citacoes", [])).to_excel(w, sheet_name="Citacoes", index=False)
 st.download_button(
 "⬇️ Baixar Plano_de_Acao.xlsx",
 data=out_xls.getvalue(),
@@ -648,15 +591,18 @@ aps_file = st.file_uploader("APS (SISAB) – CSV", type=["csv"], key="aps")
 sia_file = st.file_uploader("SIA-SUS (BPA/APAC) – CSV", type=["csv"], key="sia")
 sih_file = st.file_uploader("SIH-SUS (AIH) – CSV", type=["csv"], key="sih")
 with colB:
-cnes_prof = st.file_uploader(
-"CNES Profissionais – CSV", type=["csv"], key="cnes_prof"
-)
-cnes_eqp = st.file_uploader(
-"CNES Equipamentos – CSV", type=["csv"], key="cnes_eqp"
-)
-competencia_sus = st.text_input(
-"Competência (AAAAMM)", value="202507", key="comp_sus"
-)
+cnes_prof = st.file_uploader("CNES Profissionais – CSV", type=["csv"], key="cnes_prof")
+cnes_eqp = st.file_uploader("CNES Equipamentos – CSV", type=["csv"], key="cnes_eqp")
+competencia_sus = st.text_input("Competência (AAAAMM)", value="202507", key="comp_sus")
+
+def read_csv_safe(f):
+if not f:
+return None
+try:
+return pd.read_csv(f)
+except Exception:
+f.seek(0)
+return pd.read_excel(f)
 
 aps_df = read_csv_safe(aps_file)
 sia_df = read_csv_safe(sia_file)
@@ -665,9 +611,7 @@ cnes_prof_df = read_csv_safe(cnes_prof)
 cnes_eqp_df = read_csv_safe(cnes_eqp)
 
 if st.button("🧠 Analisar com IA (SUS)", key="ia_sus"):
-md, pts = ia_insights_sus(
-aps_df, sia_df, sih_df, cnes_prof_df, cnes_eqp_df, competencia_sus
-)
+md, pts = ia_insights_sus(aps_df, sia_df, sih_df, cnes_prof_df, cnes_eqp_df, competencia_sus)
 st.markdown(md)
 if pts is not None and not pts.empty:
 st.dataframe(pts, use_container_width=True)
@@ -687,16 +631,19 @@ with tab3:
 st.subheader("Painel Privado – Upload + IA")
 col1, col2 = st.columns(2)
 with col1:
-tiss_csv = st.file_uploader(
-"TISS (CSV/XLSX do XML)", type=["csv", "xlsx"], key="tiss_upload"
-)
+tiss_csv = st.file_uploader("TISS (CSV/XLSX do XML)", type=["csv", "xlsx"], key="tiss_upload")
 with col2:
-contratos_xlsx = st.file_uploader(
-"Parâmetros Contratuais – XLSX", type=["xlsx"], key="contratos_upload"
-)
-competencia_priv = st.text_input(
-"Competência (AAAAMM)", value="202507", key="comp_priv"
-)
+contratos_xlsx = st.file_uploader("Parâmetros Contratuais – XLSX", type=["xlsx"], key="contratos_upload")
+competencia_priv = st.text_input("Competência (AAAAMM)", value="202507", key="comp_priv")
+
+def read_any(f):
+if not f:
+return None
+try:
+return pd.read_csv(f)
+except Exception:
+f.seek(0)
+return pd.read_excel(f)
 
 tiss_df = read_any(tiss_csv)
 contratos_df = read_any(contratos_xlsx)
@@ -721,7 +668,8 @@ key="dl_plano_priv",
 with tab4:
 st.subheader("Consolidação SIGTAP – Jul/2025")
 st.write(
-"Envie AIH/BPA/APAC (texto/linha fixa). O app extrai códigos de 10 dígitos, sinaliza Jul/2025 e gera planilha para cruzar com SIGTAP."
+"Envie AIH/BPA/APAC (texto/linha fixa). O app extrai códigos de 10 dígitos, "
+"sinaliza Jul/2025 e gera planilha para cruzar com SIGTAP."
 )
 
 aih = st.file_uploader("AIH (linha fixa)", type=None, key="sig_aih")
@@ -729,7 +677,6 @@ bpa = st.file_uploader("BPA (linha fixa)", type=None, key="sig_bpa")
 apac = st.file_uploader("APAC (linha fixa)", type=None, key="sig_apac")
 
 if st.button("Gerar Excel SIGTAP (Jul/2025)", key="sig_jul"):
-
 def process(file, fonte):
 if not file:
 return []
@@ -739,9 +686,7 @@ for idx, ln in enumerate(text.splitlines(), start=1):
 codes = extract_codes(ln)
 jul = detect_jul_2025(ln)
 if codes:
-rows.append(
-[fonte, idx, ";".join(codes), len(codes), int(jul)]
-)
+rows.append([fonte, idx, ";".join(codes), len(codes), int(jul)])
 return rows
 
 rows = []
@@ -749,9 +694,7 @@ rows += process(aih, "AIH")
 rows += process(bpa, "BPA_oftalmo")
 rows += process(apac, "APAC_cirurgia")
 
-df_det = pd.DataFrame(
-rows, columns=["fonte", "line_idx", "codes_10d", "n_codes", "has_julho_2025"]
-)
+df_det = pd.DataFrame(rows, columns=["fonte", "line_idx", "codes_10d", "n_codes", "has_julho_2025"])
 # agregação simples por código/fonte
 agg = []
 if not df_det.empty:
@@ -806,20 +749,13 @@ columns=[
 )
 else:
 df_base = (
-df_agg.pivot_table(
-index="codigo", columns="fonte", values="qtd", aggfunc="sum", fill_value=0
-)
+df_agg.pivot_table(index="codigo", columns="fonte", values="qtd", aggfunc="sum", fill_value=0)
 .assign(qtd_total=lambda d: d.sum(axis=1))
 .assign(qtd_julho=0)
 .reset_index()[["codigo", "qtd_total", "qtd_julho"]]
 )
 df_base.assign(
-desc_sigtap="",
-vl_sh=0,
-vl_sa=0,
-vl_opm=0,
-vl_unit_total=0,
-valor_total_estimado=0,
+desc_sigtap="", vl_sh=0, vl_sa=0, vl_opm=0, vl_unit_total=0, valor_total_estimado=0
 ).to_excel(w, sheet_name="Consolidado_proc", index=False)
 
 st.success("Planilha gerada!")
@@ -830,3 +766,4 @@ file_name="consolidacao_SIGTAP_julho2025.xlsx",
 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 key="dl_sig_jul",
 )
+
