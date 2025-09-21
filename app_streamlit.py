@@ -6,6 +6,28 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+# ===== Engine Excel com fallback =====
+try:
+    import openpyxl  # noqa: F401
+    _EXCEL_ENGINE = "openpyxl"
+except Exception:
+    try:
+        import xlsxwriter  # noqa: F401
+        _EXCEL_ENGINE = "xlsxwriter"
+    except Exception:
+        _EXCEL_ENGINE = None
+
+def excel_writer(buffer: io.BytesIO):
+    """
+    Devolve um ExcelWriter com o melhor engine disponível.
+    Lança erro amigável se nenhum engine está instalado.
+    """
+    if _EXCEL_ENGINE is None:
+        raise RuntimeError(
+            "Nenhum engine Excel disponível. Instale 'openpyxl' ou 'XlsxWriter' "
+            "no requirements.txt."
+        )
+    return pd.ExcelWriter(buffer, engine=_EXCEL_ENGINE)
 
 # =========================
 # Config da página
@@ -376,7 +398,7 @@ with tab1:
 
         # Excel de saída
         xls_bytes = io.BytesIO()
-        with pd.ExcelWriter(xls_bytes, engine="openpyxl") as writer:
+       with excel_writer(xls_bytes) as writer:
             for fonte, df_f in all_findings:
                 df_tmp = (df_f if df_f is not None and not df_f.empty
                           else pd.DataFrame(columns=["regra_id","gravidade","registro_id","descricao","como_corrigir","impacto_estimado_RS"]))
@@ -421,7 +443,7 @@ with tab1:
                 st.dataframe(resultado["acoes"])
 
                 out_xls = io.BytesIO()
-                with pd.ExcelWriter(out_xls, engine="openpyxl") as w:
+               with excel_writer(out_xls) as w:
                     resultado["acoes"].to_excel(w, sheet_name="Plano_de_Acao", index=False)
                     pd.DataFrame(resultado.get("citacoes", [])).to_excel(w, sheet_name="Citacoes", index=False)
                 st.download_button(
@@ -562,7 +584,7 @@ with tab4:
         df_agg = pd.DataFrame(agg, columns=["codigo","fonte","qtd","qtd_julho"])
 
         out = io.BytesIO()
-        with pd.ExcelWriter(out, engine="openpyxl") as w:
+        with excel_writer(out) as w:
             # Resumo
             resumo = pd.DataFrame({
                 "Arquivos_lidos":[
