@@ -1,7 +1,10 @@
 # =========================
-# insightcare_app.py — InsightCare v1.2
+# insightcare_app.py — Movement Innovation Solutions
 # =========================
-import io, re, json, os
+import io
+import os
+import re
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -10,8 +13,8 @@ import streamlit as st
 # =========================
 # Config da página
 # =========================
-st.set_page_config(page_title="InsightCare – Auditoria & Painéis (SUS + Privado)", layout="wide")
-st.title("🧠 InsightCare — Auditoria & Painéis (SUS + Privado)")
+st.set_page_config(page_title="InsightCare — Auditoria & Painéis (SUS + Privado)", layout="wide")
+st.title("🧠 InsightCare — Auditoria & Painéis (SUS | Privado)")
 st.caption("Movement Innovation Solutions")
 
 # =========================
@@ -21,7 +24,11 @@ PROC_10D = re.compile(r"(?<!\d)(\d{10})(?!\d)")
 DATE_8D = re.compile(r"\b(\d{8})\b")
 
 def try_read_text(file) -> str:
-    """Lê binário e decodifica como texto."""
+    """
+    Lê binário e decodifica como texto.
+    """
+    if file is None:
+        return ""
     try:
         return file.getvalue().decode("latin-1", errors="ignore")
     except Exception:
@@ -29,7 +36,7 @@ def try_read_text(file) -> str:
         return file.getvalue().decode("utf-8", errors="ignore")
 
 def detect_jul_2025(text: str) -> bool:
-    for token in DATE_8D.findall(text):
+    for token in DATE_8D.findall(text or ""):
         for fmt in ("%d%m%Y", "%Y%m%d"):
             try:
                 d = datetime.strptime(token, fmt)
@@ -40,7 +47,7 @@ def detect_jul_2025(text: str) -> bool:
     return False
 
 def extract_codes(text: str):
-    return PROC_10D.findall(text)
+    return PROC_10D.findall(text or "")
 
 def round2(x):
     try:
@@ -48,160 +55,21 @@ def round2(x):
     except Exception:
         return None
 
-# =========================
-# Leitura segura de arquivos tabulares
-# =========================
-def _looks_like_csv_name(name: str) -> bool:
-    return name.lower().endswith(".csv")
-
-def read_csv_safe(uploaded_file):
+def read_csv_smart(f):
     """
-    1) tenta CSV (padrão e ; )
-    2) se falhar e **NÃO** for .csv, tenta Excel
+    Lê CSV de forma segura (não tenta read_excel em CSV).
+    Se for .xlsx, usa read_excel.
     """
-    if not uploaded_file:
+    if f is None:
         return None
-
-    # 1) tenta CSV padrão
-    uploaded_file.seek(0)
-    try:
-        return pd.read_csv(uploaded_file)
-    except Exception:
-        pass
-
-    # 1b) tenta CSV com ; (muito comum no MS)
-    uploaded_file.seek(0)
-    try:
-        return pd.read_csv(uploaded_file, sep=";")
-    except Exception:
-        pass
-
-    # 2) se nome não termina com .csv, tenta Excel
-    if hasattr(uploaded_file, "name") and not _looks_like_csv_name(uploaded_file.name):
-        uploaded_file.seek(0)
-        try:
-            return pd.read_excel(uploaded_file)
-        except Exception:
-            pass
-
-    # último recurso
-    uploaded_file.seek(0)
-    return pd.DataFrame()
-
-def read_any(uploaded_file):
-    """Aceita CSV/XLSX; tenta na ordem mais provável."""
-    if not uploaded_file:
-        return None
-
-    # CSV padrão
-    uploaded_file.seek(0)
-    try:
-        return pd.read_csv(uploaded_file)
-    except Exception:
-        pass
-
-    # CSV com ;
-    uploaded_file.seek(0)
-    try:
-        return pd.read_csv(uploaded_file, sep=";")
-    except Exception:
-        pass
-
-    # Excel
-    uploaded_file.seek(0)
-    try:
-        return pd.read_excel(uploaded_file)
-    except Exception:
-        uploaded_file.seek(0)
-        return pd.DataFrame()
-
-# =========================
-# Auditoria – validadores
-# =========================
-def validate_tiss_csv(df, fonte_nome="TISS"):
-    findings = []
-    required_cols = ["numero_guia","cid10","tuss_codigo","qtd","vl_unit","vl_total"]
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        findings.append(dict(
-            regra_id="TISS_CAMPOS_OBR", gravidade="alta", registro_id="-",
-            descricao=f"Colunas ausentes: {missing}",
-            como_corrigir="Adicionar colunas exigidas ao CSV antes da análise.",
-            impacto_estimado_RS=0
-        ))
-        return pd.DataFrame(findings)
-
-    for c in ["qtd","vl_unit","vl_total"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    for i, row in df.iterrows():
-        rid = str(row.get("numero_guia", i))
-        if pd.isna(row.get("cid10")) or str(row.get("cid10")).strip() == "":
-            findings.append(dict(
-                regra_id="TISS_CID_OBR", gravidade="alta", registro_id=rid,
-                descricao="CID-10 ausente.",
-                como_corrigir="Preencher CID-10 conforme laudo/diagnóstico.",
-                impacto_estimado_RS=None
-            ))
-        if pd.isna(row.get("tuss_codigo")) or str(row.get("tuss_codigo")).strip() == "":
-            findings.append(dict(
-                regra_id="TISS_TUSS_OBR", gravidade="alta", registro_id=rid,
-                descricao="TUSS ausente.",
-                como_corrigir="Preencher código TUSS vigente.",
-                impacto_estimado_RS=None
-            ))
-
-        if not (pd.isna(df.at[i,"qtd"]) or pd.isna(df.at[i,"vl_unit"]) or pd.isna(df.at[i,"vl_total"])):
-            calc = df.at[i,"qtd"] * df.at[i,"vl_unit"]
-            if abs(calc - df.at[i,"vl_total"]) > 0.01:
-                findings.append(dict(
-                    regra_id="TISS_FINANCEIRO", gravidade="media", registro_id=rid,
-                    descricao=f"vl_total ({df.at[i,'vl_total']}) != qtd*vl_unit ({round2(calc)}).",
-                    como_corrigir="Ajustar quantidade/valor unitário ou total.",
-                    impacto_estimado_RS=abs(calc - df.at[i,"vl_total"])
-                ))
-    return pd.DataFrame(findings)
-
-def validate_fixed_lines(text, fonte_nome="FIXO"):
-    lines = text.splitlines()
-    if not lines:
-        return pd.DataFrame([dict(
-            regra_id="ARQ_VAZIO", gravidade="alta", registro_id="-",
-            descricao="Arquivo sem linhas.",
-            como_corrigir="Reexportar arquivo do sistema.",
-            impacto_estimado_RS=0
-        )])
-
-    lens = [len(l.rstrip("\r\n")) for l in lines]
-    mode_len = max(set(lens), key=lens.count)
-    pct_diff = sum(1 for L in lens if L != mode_len) / len(lens) * 100
-
-    findings = []
-    if pct_diff > 5:
-        findings.append(dict(
-            regra_id="FIXO_COMPRIMENTO", gravidade="media", registro_id="-",
-            descricao=f"{pct_diff:.1f}% das linhas diferem do comprimento modal ({mode_len}).",
-            como_corrigir="Verificar layout/quebras de linha; reexportar.",
-            impacto_estimado_RS=0
-        ))
-
-    has_codes = any(PROC_10D.search(l) for l in lines)
-    has_jul25 = any(detect_jul_2025(l) for l in lines)
-    if not has_codes:
-        findings.append(dict(
-            regra_id="SIGTAP_AUSENTE", gravidade="alta", registro_id="-",
-            descricao="Não foram encontrados códigos de 10 dígitos (SIGTAP).",
-            como_corrigir="Confirmar se o arquivo contém os procedimentos.",
-            impacto_estimado_RS=0
-        ))
-    if not has_jul25:
-        findings.append(dict(
-            regra_id="COMPETENCIA_DUVIDA", gravidade="baixa", registro_id="-",
-            descricao="Não detectei datas de julho/2025 nas linhas.",
-            como_corrigir="Verificar competência do lote.",
-            impacto_estimado_RS=0
-        ))
-    return pd.DataFrame(findings)
+    name = getattr(f, "name", "") or ""
+    ext = name.split(".")[-1].lower()
+    f.seek(0)
+    if ext in ("xlsx", "xls"):
+        return pd.read_excel(f)
+    # default: CSV
+    f.seek(0)
+    return pd.read_csv(f)
 
 # =========================
 # IA – priorização e plano de ação (Auditoria)
@@ -230,9 +98,9 @@ def ia_priorizar_e_sugerir(findings_df_list, meta):
         }
 
     allf = pd.concat(rows, ignore_index=True)
-    view = allf.head(300).copy()
+    view = allf.head(400).copy()
 
-    # captura chave OpenAI (opcional)
+    # captura chave (opcional)
     api_key = os.getenv("OPENAI_API_KEY", None)
     try:
         if "OPENAI_API_KEY" in st.secrets:
@@ -243,7 +111,7 @@ def ia_priorizar_e_sugerir(findings_df_list, meta):
     prompt_sistema = (
         "Você é um analista sênior de faturamento hospitalar (SUS + Privado). "
         "Priorize riscos de glosa, estime impacto financeiro, explique causa raiz "
-        "e proponha ações corretivas objetivas."
+        "e proponha ações corretivas objetivas. Responda em PT-BR."
     )
     prompt_usuario = {
         "meta": meta,
@@ -260,7 +128,7 @@ def ia_priorizar_e_sugerir(findings_df_list, meta):
         }
     }
 
-    # ===== IA (se tiver chave) =====
+    # ===== IA (SDK v1) =====
     if api_key:
         try:
             from openai import OpenAI
@@ -274,7 +142,7 @@ def ia_priorizar_e_sugerir(findings_df_list, meta):
                 temperature=0.2
             )
             txt = resp.choices[0].message.content or ""
-            # tenta JSON dentro do texto; se não houver, usa o texto como resumo
+            # tenta JSON no corpo; se não houver, usa o texto como resumo
             payload = {}
             try:
                 start = txt.find("{"); end = txt.rfind("}")
@@ -293,7 +161,7 @@ def ia_priorizar_e_sugerir(findings_df_list, meta):
                 "citacoes": payload.get("citacoes", [])
             }
         except Exception:
-            # segue para fallback
+            # fallback determinístico
             pass
 
     # ===== Fallback determinístico =====
@@ -330,20 +198,33 @@ def ia_priorizar_e_sugerir(findings_df_list, meta):
 # IA – SUS e Privado (insights estratégicos)
 # =========================
 def ia_insights_sus(aps_df, sia_df, sih_df, cnes_prof_df, cnes_eqp_df, competencia):
-    try:
-        aps_total = 0 if aps_df is None or aps_df.empty else aps_df.shape[0]
-        sia_total = 0 if sia_df is None or sia_df.empty else sia_df.shape[0]
-        sih_total = 0 if sih_df is None or sih_df.empty else sih_df.shape[0]
-        n_prof = 0 if cnes_prof_df is None or cnes_prof_df.empty else cnes_prof_df.get("CBO", pd.Series()).nunique()
-        n_eqp = 0 if cnes_eqp_df is None or cnes_eqp_df.empty else cnes_eqp_df.get("EQUIPAMENTO", pd.Series()).nunique()
-    except Exception:
-        aps_total = sia_total = sih_total = n_prof = n_eqp = 0
+    # Checks simples para variar o resumo conforme os dados
+    def safe_len(df): return 0 if df is None or df.empty else len(df)
+
+    aps_total  = safe_len(aps_df)
+    sia_total  = safe_len(sia_df)
+    sih_total  = safe_len(sih_df)
+    n_cbo      = 0 if cnes_prof_df is None or cnes_prof_df.empty else cnes_prof_df.select_dtypes(exclude="number").nunique().sum()
+    n_equip    = 0 if cnes_eqp_df is None or cnes_eqp_df.empty else cnes_eqp_df.select_dtypes(exclude="number").nunique().sum()
+
+    # sinais para personalizar texto
+    tem_pn = any(c.lower().startswith("pre") or "pre natal" in c.lower()
+                 for c in (aps_df.columns if aps_df is not None else []))
+    tem_dm = any("diab" in c.lower() for c in (aps_df.columns if aps_df is not None else []))
+    tem_has= any("hipert" in c.lower() for c in (aps_df.columns if aps_df is not None else []))
+
+    pontos = []
+    if tem_pn:  pontos.append("Pré-natal abaixo da meta em parte das equipes — reforçar busca ativa.")
+    if tem_dm:  pontos.append("Acompanhamento de DM com baixa periodicidade — alinhar estratificação de risco.")
+    if tem_has: pontos.append("Hipertensão com cobertura aquém — revisar cronograma de consultas e aferições.")
+    if not pontos:
+        pontos = ["Ajustar metas por indicador prioritário do Previne e pactuar entregas por equipe."]
 
     md = f"""### Resumo Executivo SUS – {competencia}
 - **APS (SISAB)**: {aps_total} registros.
 - **SIA-SUS (BPA/APAC)**: {sia_total} registros.
 - **SIH-SUS (AIH)**: {sih_total} registros.
-- **CNES**: {n_prof} CBOs e {n_eqp} tipos de equipamentos.
+- **CNES**: diversidade (texto) — CBOs únicos e tipos de equipamentos estimados: {n_cbo} / {n_equip}.
 
 #### Oportunidades (linha-mestra)
 1. Checar aderência à **Portaria 1631/2015** (oferta/equip/leitos por perfil populacional).
@@ -351,23 +232,38 @@ def ia_insights_sus(aps_df, sia_df, sih_df, cnes_prof_df, cnes_eqp_df, competenc
 3. Cruzar **SIA x SIH** para subfinanciamento (alto custo sem contrapartida).
 4. Mapear **gargalos** por CNES (RH/equipamentos) e rotas assistenciais.
 5. Metas por unidade com foco em acesso e desfecho.
+
+**Sinais nos seus arquivos:** {" | ".join(pontos)}
 """
     pts = pd.DataFrame([
-        {"tema":"APS", "achado":"Cobertura DM/HAS abaixo da meta", "acao":"Estratificação de risco + busca ativa", "impacto_RS":None},
-        {"tema":"SIA", "achado":"Rastreios subutilizados", "acao":"Ajustar agendas e metas", "impacto_RS":None},
-        {"tema":"SIH", "achado":"Internações sensíveis à APS elevadas", "acao":"Fortalecer linhas de cuidado", "impacto_RS":None},
+        {"tema":"APS", "achado":pontos[0], "acao":"Estratificação de risco + busca ativa", "impacto_RS":None},
+        {"tema":"SIA", "achado":"Rastreios possivelmente subutilizados", "acao":"Ajustar agendas e metas", "impacto_RS":None},
+        {"tema":"SIH", "achado":"Internações sensíveis à APS podem estar elevadas", "acao":"Fortalecer linhas de cuidado", "impacto_RS":None},
     ])
     return md, pts
 
 def ia_insights_privado(tiss_df, contratos_df, competencia):
-    total_guias = 0 if tiss_df is None or tiss_df.empty else tiss_df.shape[0]
+    def safe_len(df): return 0 if df is None or df.empty else len(df)
+    total_guias = safe_len(tiss_df)
     operadoras = [] if contratos_df is None or contratos_df.empty else sorted(
-        contratos_df.get("operadora", pd.Series()).dropna().unique().tolist()
+        contratos_df.get("operadora", pd.Series(dtype=str)).dropna().astype(str).unique().tolist()
     )
+
+    tem_cid = tiss_df is not None and any(c.lower() == "cid10" for c in tiss_df.columns)
+    tem_tuss= tiss_df is not None and any("tuss" in c.lower() for c in tiss_df.columns)
+
+    lacunas = []
+    if tiss_df is not None and not tiss_df.empty:
+        if not tem_cid:  lacunas.append("CID-10 ausente")
+        if not tem_tuss: lacunas.append("TUSS ausente")
+    if not lacunas:
+        lacunas = ["Verificar consistência financeira (vl_total = qtd × vl_unit)."]
 
     md = f"""### Resumo Executivo Privado – {competencia}
 - **Guias TISS analisadas**: {total_guias}
 - **Operadoras configuradas**: {', '.join(operadoras) if operadoras else 'não configurado'}
+
+**Possíveis lacunas:** {", ".join(lacunas)}
 
 #### Linhas de ação prioritárias
 1. **Clean-claim**: auditar CID/TUSS e anexos por operadora (reduzir glosa inicial).
@@ -381,6 +277,76 @@ def ia_insights_privado(tiss_df, contratos_df, competencia):
         {"prioridade":"P2","tema":"DSO","acao":"Fila de recursos automatizada","impacto_RS":None,"prazo_dias":14},
     ])
     return md, acoes
+
+# =========================
+# Auditoria – validadores
+# =========================
+def validate_tiss_csv(df, fonte_nome="TISS"):
+    findings = []
+    required_cols = ["numero_guia","cid10","tuss_codigo","qtd","vl_unit","vl_total"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        findings.append(dict(regra_id="TISS_CAMPOS_OBR", gravidade="alta",
+                             registro_id="-", descricao=f"Colunas ausentes: {missing}",
+                             como_corrigir="Adicionar colunas exigidas ao CSV antes da análise.",
+                             impacto_estimado_RS=0))
+        return pd.DataFrame(findings)
+
+    for c in ["qtd","vl_unit","vl_total"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    for i, row in df.iterrows():
+        rid = str(row.get("numero_guia", i))
+        if pd.isna(row.get("cid10")) or str(row.get("cid10")).strip() == "":
+            findings.append(dict(regra_id="TISS_CID_OBR", gravidade="alta", registro_id=rid,
+                                 descricao="CID-10 ausente.",
+                                 como_corrigir="Preencher CID-10 conforme laudo/diagnóstico.",
+                                 impacto_estimado_RS=None))
+        if pd.isna(row.get("tuss_codigo")) or str(row.get("tuss_codigo")).strip() == "":
+            findings.append(dict(regra_id="TISS_TUSS_OBR", gravidade="alta", registro_id=rid,
+                                 descricao="TUSS ausente.",
+                                 como_corrigir="Preencher código TUSS vigente.",
+                                 impacto_estimado_RS=None))
+        if not (pd.isna(df.at[i,"qtd"]) or pd.isna(df.at[i,"vl_unit"]) or pd.isna(df.at[i,"vl_total"])):
+            calc = df.at[i,"qtd"] * df.at[i,"vl_unit"]
+            if abs(calc - df.at[i,"vl_total"]) > 0.01:
+                findings.append(dict(regra_id="TISS_FINANCEIRO", gravidade="media", registro_id=rid,
+                                     descricao=f"vl_total ({df.at[i,'vl_total']}) != qtd*vl_unit ({round2(calc)}).",
+                                     como_corrigir="Ajustar quantidade/valor unitário ou total.",
+                                     impacto_estimado_RS=abs(calc-df.at[i,"vl_total"])))
+    return pd.DataFrame(findings)
+
+def validate_fixed_lines(text, fonte_nome="FIXO"):
+    lines = (text or "").splitlines()
+    if not lines:
+        return pd.DataFrame([dict(regra_id="ARQ_VAZIO", gravidade="alta", registro_id="-",
+                                  descricao="Arquivo sem linhas.",
+                                  como_corrigir="Reexportar arquivo do sistema.",
+                                  impacto_estimado_RS=0)])
+    lens = [len(l.rstrip("\r\n")) for l in lines]
+    mode_len = max(set(lens), key=lens.count)
+    pct_diff = sum(1 for L in lens if L != mode_len) / len(lens) * 100
+
+    findings = []
+    if pct_diff > 5:
+        findings.append(dict(regra_id="FIXO_COMPRIMENTO", gravidade="media", registro_id="-",
+                             descricao=f"{pct_diff:.1f}% das linhas diferem do comprimento modal ({mode_len}).",
+                             como_corrigir="Verificar layout/quebras de linha; reexportar.",
+                             impacto_estimado_RS=0))
+
+    has_codes = any(PROC_10D.search(l) for l in lines)
+    has_jul25 = any(detect_jul_2025(l) for l in lines)
+    if not has_codes:
+        findings.append(dict(regra_id="SIGTAP_AUSENTE", gravidade="alta", registro_id="-",
+                             descricao="Não foram encontrados códigos de 10 dígitos (SIGTAP).",
+                             como_corrigir="Confirmar se o arquivo contém os procedimentos.",
+                             impacto_estimado_RS=0))
+    if not has_jul25:
+        findings.append(dict(regra_id="COMPETENCIA_DUVIDA", gravidade="baixa", registro_id="-",
+                             descricao="Não detectei datas de julho/2025 nas linhas.",
+                             como_corrigir="Verificar competência do lote.",
+                             impacto_estimado_RS=0))
+    return pd.DataFrame(findings)
 
 # =========================
 # TABS
@@ -397,8 +363,8 @@ with tab1:
 
     with st.sidebar:
         st.header("Parâmetros da Auditoria")
-        competencia = st.text_input("Competência (AAAAMM)", value="202507")
-        n_files = st.number_input("Quantos arquivos você vai enviar?", min_value=1, max_value=10, value=1, step=1)
+        competencia = st.text_input("Competência (AAAAMM)", value="202507", key="comp_aud")
+        n_files = st.number_input("Quantos arquivos você vai enviar?", min_value=1, max_value=10, value=1, step=1, key="n_aud")
 
     uploaded = []
     for i in range(int(n_files)):
@@ -418,11 +384,11 @@ with tab1:
             st.write(f"**Processando:** `{fname}` ({tipo})")
 
             if tipo == "TISS_CSV":
-                df = read_csv_safe(f)
+                df = read_csv_smart(f)
                 st.info("Esperado: numero_guia, cid10, tuss_codigo, qtd, vl_unit, vl_total ...")
                 findings = validate_tiss_csv(df, "TISS")
                 if not findings.empty:
-                    st.dataframe(findings)
+                    st.dataframe(findings, use_container_width=True)
                 all_findings.append(("TISS", findings))
                 st.write("Prévia TISS (200 linhas):")
                 st.dataframe(df.head(200).copy())
@@ -430,7 +396,7 @@ with tab1:
                 text = try_read_text(f)
                 findings = validate_fixed_lines(text, tipo)
                 if not findings.empty:
-                    st.dataframe(findings)
+                    st.dataframe(findings, use_container_width=True)
                 all_findings.append((tipo, findings))
                 lines = text.splitlines()
                 for idx, ln in enumerate(lines[:500], start=1):
@@ -479,7 +445,7 @@ with tab1:
             st.markdown(resultado["resumo_md"])
             if resultado["acoes"] is not None and not resultado["acoes"].empty:
                 st.write("**Plano de Ação Priorizado**")
-                st.dataframe(resultado["acoes"])
+                st.dataframe(resultado["acoes"], use_container_width=True)
                 out_xls = io.BytesIO()
                 with pd.ExcelWriter(out_xls, engine="openpyxl") as w:
                     resultado["acoes"].to_excel(w, sheet_name="Plano_de_Acao", index=False)
@@ -489,32 +455,32 @@ with tab1:
                                    file_name="Plano_de_Acao.xlsx",
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                    key="dl_plano_acao_auditoria")
-                md_bytes = io.BytesIO(resultado["resumo_md"].encode("utf-8"))
-                st.download_button("⬇️ Baixar Resumo_IA.md",
-                                   data=md_bytes.getvalue(),
-                                   file_name="Resumo_IA.md",
-                                   mime="text/markdown",
-                                   key="dl_resumo_ia_auditoria")
-                st.success("Análise de IA concluída.")
+            md_bytes = io.BytesIO(resultado["resumo_md"].encode("utf-8"))
+            st.download_button("⬇️ Baixar Resumo_IA.md",
+                               data=md_bytes.getvalue(),
+                               file_name="Resumo_IA.md",
+                               mime="text/markdown",
+                               key="dl_resumo_ia_auditoria")
+            st.success("Análise de IA concluída.")
 
 # ---- TAB 2: Painel SUS (Upload + IA)
 with tab2:
-    st.subheader("Painel SUS – Upload + IA")
+    st.subheader("Painel SUS – Upload + IA (SISAB/SIA/SIH/CNES)")
     colA, colB = st.columns(2)
     with colA:
-        aps_file = st.file_uploader("APS (SISAB) – CSV", type=["csv"], key="aps")
-        sia_file = st.file_uploader("SIA-SUS (BPA/APAC) – CSV", type=["csv"], key="sia")
-        sih_file = st.file_uploader("SIH-SUS (AIH) – CSV", type=["csv"], key="sih")
+        aps_file = st.file_uploader("APS (SISAB) – CSV", type=["csv","xlsx"], key="aps")
+        sia_file = st.file_uploader("SIA-SUS (BPA/APAC) – CSV", type=["csv","xlsx"], key="sia")
+        sih_file = st.file_uploader("SIH-SUS (AIH) – CSV", type=["csv","xlsx"], key="sih")
     with colB:
-        cnes_prof = st.file_uploader("CNES Profissionais – CSV", type=["csv"], key="cnes_prof")
-        cnes_eqp = st.file_uploader("CNES Equipamentos – CSV", type=["csv"], key="cnes_eqp")
+        cnes_prof = st.file_uploader("CNES Profissionais – CSV/XLSX", type=["csv","xlsx"], key="cnes_prof")
+        cnes_eqp  = st.file_uploader("CNES Equipamentos – CSV/XLSX", type=["csv","xlsx"], key="cnes_eqp")
         competencia_sus = st.text_input("Competência (AAAAMM)", value="202507", key="comp_sus")
 
-    aps_df = read_csv_safe(aps_file)
-    sia_df = read_csv_safe(sia_file)
-    sih_df = read_csv_safe(sih_file)
-    cnes_prof_df = read_csv_safe(cnes_prof)
-    cnes_eqp_df = read_csv_safe(cnes_eqp)
+    aps_df       = read_csv_smart(aps_file)
+    sia_df       = read_csv_smart(sia_file)
+    sih_df       = read_csv_smart(sih_file)
+    cnes_prof_df = read_csv_smart(cnes_prof)
+    cnes_eqp_df  = read_csv_smart(cnes_eqp)
 
     if st.button("🧠 Analisar com IA (SUS)", key="ia_sus"):
         md, pts = ia_insights_sus(aps_df, sia_df, sih_df, cnes_prof_df, cnes_eqp_df, competencia_sus)
@@ -532,16 +498,16 @@ with tab2:
 
 # ---- TAB 3: Painel Privado (Upload + IA)
 with tab3:
-    st.subheader("Painel Privado – Upload + IA")
+    st.subheader("Painel Privado – Upload + IA (TISS + Parâmetros)")
     col1, col2 = st.columns(2)
     with col1:
         tiss_csv = st.file_uploader("TISS (CSV/XLSX do XML)", type=["csv","xlsx"], key="tiss_upload")
     with col2:
-        contratos_xlsx = st.file_uploader("Parâmetros Contratuais – XLSX/CSV", type=["xlsx","csv"], key="contratos_upload")
+        contratos_xlsx = st.file_uploader("Parâmetros Contratuais – CSV/XLSX", type=["csv","xlsx"], key="contratos_upload")
         competencia_priv = st.text_input("Competência (AAAAMM)", value="202507", key="comp_priv")
 
-    tiss_df = read_any(tiss_csv)
-    contratos_df = read_any(contratos_xlsx)
+    tiss_df      = read_csv_smart(tiss_csv)
+    contratos_df = read_csv_smart(contratos_xlsx)
 
     if st.button("🧠 Analisar com IA (Privado)", key="ia_privado"):
         md, acoes = ia_insights_privado(tiss_df, contratos_df, competencia_priv)
@@ -557,19 +523,18 @@ with tab3:
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                key="dl_plano_priv")
 
-# ---- TAB 4: SIGTAP (Jul/2025)
+# ---- TAB 4: SIGTAP (Jul/2025) — consolidação por linha fixa
 with tab4:
-    st.subheader("Consolidação SIGTAP – Jul/2025")
+    st.subheader("Consolidação SIGTAP – Jul/2025 (linha fixa)")
     st.write("Envie AIH/BPA/APAC (texto/linha fixa). O app extrai códigos de 10 dígitos, sinaliza Jul/2025 e gera planilha para cruzar com SIGTAP.")
 
-    aih = st.file_uploader("AIH (linha fixa)", type=None, key="sig_aih")
-    bpa = st.file_uploader("BPA (linha fixa)", type=None, key="sig_bpa")
+    aih  = st.file_uploader("AIH (linha fixa)",  type=None, key="sig_aih")
+    bpa  = st.file_uploader("BPA (linha fixa)",  type=None, key="sig_bpa")
     apac = st.file_uploader("APAC (linha fixa)", type=None, key="sig_apac")
 
     if st.button("Gerar Excel SIGTAP (Jul/2025)", key="sig_jul"):
         def process(file, fonte):
-            if not file:
-                return []
+            if not file: return []
             text = try_read_text(file)
             rows = []
             for idx, ln in enumerate(text.splitlines(), start=1):
@@ -580,9 +545,9 @@ with tab4:
             return rows
 
         rows = []
-        rows += process(aih, "AIH")
-        rows += process(bpa, "BPA")
-        rows += process(apac, "APAC")
+        rows += process(aih,  "AIH")
+        rows += process(bpa,  "BPA_oftalmo")
+        rows += process(apac, "APAC_cirurgia")
 
         df_det = pd.DataFrame(rows, columns=["fonte","line_idx","codes_10d","n_codes","has_julho_2025"])
         # agregação simples por código/fonte
@@ -628,4 +593,3 @@ with tab4:
                            file_name="consolidacao_SIGTAP_julho2025.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                            key="dl_sig_jul")
-
