@@ -1,6 +1,6 @@
-# ✨ Análise de Pele com IA — Instituto Card
+# ✨ Análise de Pele com IA — Instituto Cardo
 
-Ferramenta de **isca digital** para o site do Instituto Card (institutocard.com.br): a pessoa tira fotos do rosto, informa nome e WhatsApp, e recebe na hora uma análise estética da pele feita por inteligência artificial (Claude, da Anthropic) — score geral, 8 dimensões analisadas (rugas, manchas, textura, poros, oleosidade, hidratação, olheiras, firmeza), pontos fortes, cuidados recomendados e procedimentos sugeridos.
+Ferramenta de **isca digital** para o site do Instituto Cardo (institutocardo.com.br): a pessoa tira fotos do rosto, informa nome e WhatsApp, e recebe na hora uma análise estética da pele feita por inteligência artificial (Claude, da Anthropic) — score geral, 8 dimensões analisadas (rugas, manchas, textura, poros, oleosidade, hidratação, olheiras, firmeza), pontos fortes, cuidados recomendados e procedimentos sugeridos.
 
 **Cada análise gera um lead** (nome + WhatsApp + e-mail + score) salvo no banco, pronto para o time comercial fazer o acompanhamento.
 
@@ -26,7 +26,7 @@ uvicorn server:app --reload --port 8000
 
 Abra http://localhost:8000
 
-## Publicando (institutocard.com.br)
+## Publicando (institutocardo.com.br)
 
 A forma mais simples é publicar em um **subdomínio** e linkar no site principal:
 
@@ -34,16 +34,16 @@ A forma mais simples é publicar em um **subdomínio** e linkar no site principa
    - Comando de start: `uvicorn server:app --host 0.0.0.0 --port $PORT`
    - Configure as variáveis de ambiente do `.env.example`
    - Se a hospedagem tiver disco persistente, aponte `DB_PATH` para ele (ex.: `/data/leads.db`) para não perder leads em re-deploys
-2. **Crie o subdomínio** no DNS do institutocard.com.br:
-   - `analise.institutocard.com.br` → CNAME apontando para a URL da hospedagem
+2. **Crie o subdomínio** no DNS do institutocardo.com.br:
+   - `analise.institutocardo.com.br` → CNAME apontando para a URL da hospedagem
 3. **No site principal**, adicione um botão/banner chamativo:
-   - "✨ Faça sua análise de pele gratuita com IA" → link para `https://analise.institutocard.com.br`
+   - "✨ Faça sua análise de pele gratuita com IA" → link para `https://analise.institutocardo.com.br`
    - Também funciona muito bem como link na bio do Instagram e em anúncios
 
 ## Vendo os leads capturados
 
 ```
-https://analise.institutocard.com.br/api/leads.csv?token=SEU_ADMIN_TOKEN
+https://analise.institutocardo.com.br/api/leads.csv?token=SEU_ADMIN_TOKEN
 ```
 
 Retorna CSV com: data, nome, WhatsApp, e-mail, score e resumo da análise — dá para abrir direto no Excel/Google Sheets.
