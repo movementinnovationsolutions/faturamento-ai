@@ -2,3 +2,9 @@ streamlit>=1.37
 pandas>=2.2.3
 openpyxl>=3.1.5
 XlsxWriter>=3.2.0
+
+# Dependências da Análise de Pele (analise-pele/) — instaladas junto para
+# permitir deploy a partir da raiz do repositório (Railway)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+anthropic>=0.116

@@ -29,7 +29,18 @@ MAX_ANALISES_POR_IP_HORA = int(os.environ.get("MAX_ANALISES_POR_IP_HORA", "6"))
 
 app = FastAPI(title="Análise de Pele IA — Instituto Card")
 
-client = anthropic.Anthropic()
+# Cliente criado sob demanda: se a ANTHROPIC_API_KEY faltar, o site continua
+# no ar e o erro aparece apenas (e claramente) na hora da análise.
+_client: anthropic.Anthropic | None = None
+
+
+def get_client() -> anthropic.Anthropic:
+    global _client
+    if _client is None:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise HTTPException(503, "Serviço de análise não configurado (ANTHROPIC_API_KEY ausente).")
+        _client = anthropic.Anthropic()
+    return _client
 
 
 # =========================
@@ -219,7 +230,7 @@ def analisar_com_claude(fotos: List[Foto]) -> dict:
         }
     )
 
-    response = client.messages.create(
+    response = get_client().messages.create(
         model=MODEL,
         max_tokens=4096,
         thinking={"type": "adaptive"},
