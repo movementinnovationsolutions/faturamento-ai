@@ -32,11 +32,15 @@ h1,h2,h3,.serif{font-family:'Cormorant Garamond',serif}
 .hero{background:linear-gradient(168deg,var(--verde) 0%,var(--verde-escuro) 100%);color:var(--branco);padding:56px 0 64px;position:relative;overflow:hidden}
 .hero::after{content:"";position:absolute;right:-120px;top:-120px;width:340px;height:340px;border-radius:50%;border:1px solid rgba(197,174,208,.25)}
 .hero::before{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;border:1px solid rgba(197,174,208,.18)}
-.marca{display:flex;align-items:center;gap:12px;margin-bottom:44px}
-.marca .flor{width:34px;height:auto;opacity:.95}
-.marca .nome{display:flex;flex-direction:column;font-size:14px;letter-spacing:.22em;text-transform:uppercase;color:#fff;line-height:1.5}
-.marca .nome small{font-size:9px;letter-spacing:.34em;color:var(--dourado-claro);font-weight:400}
+.topo-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:44px}
+.marca{display:flex;align-items:center;gap:12px;min-width:0}
+.marca .flor{width:34px;height:auto;opacity:.95;flex-shrink:0}
+.marca .nome{display:flex;flex-direction:column;font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#fff;line-height:1.5;white-space:nowrap}
+.marca .nome small{font-size:9px;letter-spacing:.3em;color:var(--dourado-claro);font-weight:400}
+@media (max-width:360px){.marca .nome{font-size:11.5px;letter-spacing:.12em}}
 .logo-topo{display:block;margin:0 auto 20px;width:150px;max-width:60%}
+.radar-wrap{text-align:center;margin:4px 0 8px}
+.radar-wrap svg{max-width:330px;width:100%;height:auto}
 .hero .selo{display:inline-block;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--dourado-claro);border:1px solid rgba(197,174,208,.45);border-radius:100px;padding:6px 16px;margin-bottom:20px}
 .hero h1{font-size:clamp(34px,8vw,46px);font-weight:500;line-height:1.15;margin-bottom:16px}
 .hero h1 em{font-style:italic;color:var(--dourado-claro)}
@@ -138,9 +142,9 @@ footer{text-align:center;padding:30px 20px 40px;font-size:12px;color:var(--texto
 <!-- ========== HERO ========== -->
 <section class="hero" id="tela-hero">
   <div class="container">
-    <div style="position:relative">
-      <a class="voltar-hero" href="https://institutocardo.com.br">voltar ao site ↗</a>
+    <div class="topo-hero">
       <div class="marca"><img class="flor" src="/static/flor-branca.png" alt="Flor de cardo"><div class="nome">Instituto Cardo<small>Aesthetic</small></div></div>
+      <a class="voltar-hero" style="position:static;flex-shrink:0;margin-top:6px" href="https://institutocardo.com.br">voltar ao site ↗</a>
     </div>
     <span class="selo">Gratuito · Resultado em 2 minutos</span>
     <h1>Descubra o que a sua <em>pele</em> está querendo te dizer</h1>
@@ -258,6 +262,9 @@ footer{text-align:center;padding:30px 20px 40px;font-size:12px;color:var(--texto
         <div class="tipo-pele" id="tipo-pele"></div>
       </div>
       <p class="resumo-texto" id="resumo-texto"></p>
+
+      <p class="secao-titulo">Mapa da sua pele</p>
+      <div class="radar-wrap" id="radar-wrap"></div>
 
       <p class="secao-titulo">Análise detalhada</p>
       <div id="lista-dimensoes"></div>
@@ -428,6 +435,48 @@ async function enviarAnalise(){
   }
 }
 
+// ================= RADAR =================
+const ROTULO_CURTO = {
+  'Linhas e rugas':'Linhas', 'Manchas e uniformidade':'Manchas', 'Textura':'Textura',
+  'Poros':'Poros', 'Oleosidade aparente':'Oleosidade', 'Hidratação aparente':'Hidratação',
+  'Olheiras e área dos olhos':'Olhos', 'Firmeza':'Firmeza'
+};
+
+function desenharRadar(dimensoes){
+  const n = dimensoes.length;
+  if(n < 3){ return ''; }
+  const C = 165, CY = 160, R = 100;
+  const ponto = (i, raio) => {
+    const ang = -Math.PI/2 + (2*Math.PI*i)/n;
+    return [C + raio*Math.cos(ang), CY + raio*Math.sin(ang)];
+  };
+  const poligono = raio => dimensoes.map((_,i)=>ponto(i,raio).map(v=>v.toFixed(1)).join(',')).join(' ');
+
+  let svg = `<svg viewBox="0 0 330 330" role="img" aria-label="Mapa da pele">`;
+  // anéis de referência
+  [25,50,75,100].forEach(p=>{
+    svg += `<polygon points="${poligono(R*p/100)}" fill="none" stroke="rgba(141,106,151,.18)" stroke-width="1"/>`;
+  });
+  // raios
+  dimensoes.forEach((_,i)=>{
+    const [x,y] = ponto(i,R);
+    svg += `<line x1="${C}" y1="${CY}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="rgba(141,106,151,.14)" stroke-width="1"/>`;
+  });
+  // polígono dos dados
+  const dados = dimensoes.map((d,i)=>ponto(i, R*Math.max(8, Math.min(100,d.score))/100));
+  svg += `<polygon points="${dados.map(p=>p.map(v=>v.toFixed(1)).join(',')).join(' ')}"
+           fill="rgba(141,106,151,.28)" stroke="#8d6a97" stroke-width="2" stroke-linejoin="round"/>`;
+  dados.forEach(p=>{ svg += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.4" fill="#8d6a97"/>`; });
+  // rótulos
+  dimensoes.forEach((d,i)=>{
+    const [x,y] = ponto(i, R+22);
+    const ancora = Math.abs(x-C) < 12 ? 'middle' : (x>C ? 'start' : 'end');
+    svg += `<text x="${x.toFixed(1)}" y="${(y+3.5).toFixed(1)}" text-anchor="${ancora}"
+             font-family="Jost,sans-serif" font-size="11.5" fill="#7a7580">${ROTULO_CURTO[d.nome]||d.nome.split(' ')[0]}</text>`;
+  });
+  return svg + '</svg>';
+}
+
 // ================= RESULTADO =================
 function mostrarResultado(a){
   estado.analise = a;
@@ -442,6 +491,8 @@ function mostrarResultado(a){
   const tipos = { seca:'Tendência a pele seca', normal:'Pele de aspecto normal', mista:'Tendência a pele mista', oleosa:'Tendência a pele oleosa', indeterminado:'Tipo de pele a confirmar' };
   document.getElementById('tipo-pele').textContent = tipos[a.tipo_pele_aparente] || '';
   document.getElementById('resumo-texto').textContent = '“'+a.resumo+'”';
+
+  document.getElementById('radar-wrap').innerHTML = desenharRadar(a.dimensoes||[]);
 
   const dims = document.getElementById('lista-dimensoes'); dims.innerHTML='';
   (a.dimensoes||[]).forEach(d=>{
