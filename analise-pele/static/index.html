@@ -46,6 +46,11 @@ h1,h2,h3,.serif{font-family:'Cormorant Garamond',serif}
 .btn:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
 .btn.largo{width:100%}
 .btn.fantasma{background:transparent;color:var(--creme);border:1px solid rgba(216,189,138,.6)}
+.btn.contorno{background:transparent;color:var(--verde);border:1.5px solid var(--dourado)}
+.voltar-site{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--texto-suave);text-decoration:none;margin-bottom:14px}
+.voltar-site:hover{color:var(--verde)}
+.hero .voltar-hero{position:absolute;top:0;right:0;font-size:12px;color:rgba(255,253,249,.6);text-decoration:none;letter-spacing:.04em}
+.acoes-resultado{display:grid;gap:10px;margin-top:26px}
 .hero .nota{font-size:13px;color:rgba(255,253,249,.55);margin-top:14px}
 
 /* ---------- CARTÕES / ETAPAS ---------- */
@@ -130,7 +135,10 @@ footer{text-align:center;padding:30px 20px 40px;font-size:12px;color:var(--texto
 <!-- ========== HERO ========== -->
 <section class="hero" id="tela-hero">
   <div class="container">
-    <div class="marca"><div class="simbolo">IC</div><div class="nome">Instituto Card</div></div>
+    <div style="position:relative">
+      <a class="voltar-hero" href="https://institutocard.com.br">voltar ao site ↗</a>
+      <div class="marca"><div class="simbolo">IC</div><div class="nome">Instituto Card</div></div>
+    </div>
     <span class="selo">Gratuito · Resultado em 2 minutos</span>
     <h1>Descubra o que a sua <em>pele</em> está querendo te dizer</h1>
     <p>Nossa inteligência artificial analisa fotos do seu rosto e entrega um panorama completo: linhas, manchas, textura, hidratação e muito mais.</p>
@@ -262,6 +270,12 @@ footer{text-align:center;padding:30px 20px 40px;font-size:12px;color:var(--texto
         <h3>Quer transformar essa análise em um <em>plano real</em>?</h3>
         <p>Agende uma avaliação presencial gratuita no Instituto Card e converse com nossas especialistas sobre o seu resultado.</p>
         <a class="btn" id="btn-whatsapp" href="#" target="_blank" rel="noopener">Agendar pelo WhatsApp 💬</a>
+      </div>
+
+      <div class="acoes-resultado">
+        <button class="btn largo contorno" id="btn-pdf" onclick="baixarRelatorio()">📄 Baixar meu relatório em PDF</button>
+        <button class="btn largo contorno" onclick="location.reload()">🔁 Fazer nova análise</button>
+        <a class="voltar-site" style="justify-content:center;margin:4px 0 0" href="https://institutocard.com.br">← Voltar ao site do Instituto Card</a>
       </div>
 
       <p class="disclaimer">Esta análise é gerada por inteligência artificial com base nas fotos enviadas e tem caráter informativo e estético. Ela não substitui avaliação presencial nem constitui diagnóstico médico ou dermatológico.</p>
@@ -411,6 +425,7 @@ async function enviarAnalise(){
 
 // ================= RESULTADO =================
 function mostrarResultado(a){
+  estado.analise = a;
   irPara('tela-resultado');
   const score = Math.max(0, Math.min(100, a.score_geral));
   document.getElementById('score-num').textContent = score;
@@ -455,6 +470,39 @@ function mostrarResultado(a){
   const btn = document.getElementById('btn-whatsapp');
   btn.href = numero ? `https://wa.me/${numero}?text=${msg}` : '#';
   if(!numero) btn.style.display='none';
+}
+
+// ================= RELATÓRIO PDF =================
+async function baixarRelatorio(){
+  const btn = document.getElementById('btn-pdf');
+  const rotulo = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Gerando seu relatório…';
+  try{
+    const r = await fetch('/api/relatorio',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        nome: estado.lead.nome,
+        foto_base64: (estado.fotos.frente||'').split(',')[1] || null,
+        analise: estado.analise
+      })
+    });
+    if(!r.ok) throw new Error('falha');
+    const blob = await r.blob();
+    const arquivo = new File([blob], 'analise-de-pele-instituto-card.pdf', {type:'application/pdf'});
+    if(navigator.canShare && navigator.canShare({files:[arquivo]})){
+      try{
+        await navigator.share({files:[arquivo], title:'Minha Análise de Pele — Instituto Card'});
+      }catch(e){ /* usuária cancelou o compartilhamento — tudo bem */ }
+    }else{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = arquivo.name; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    }
+  }catch(e){
+    alert('Não foi possível gerar o relatório agora. Tente novamente em instantes.');
+  }
+  btn.disabled = false; btn.textContent = rotulo;
 }
 
 // Máscara simples de telefone

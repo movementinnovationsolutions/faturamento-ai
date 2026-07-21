@@ -14,11 +14,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+import io
+
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from reportlab.lib.colors import HexColor
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader, simpleSplit
+from reportlab.pdfgen import canvas as pdfcanvas
 
 BASE_DIR = Path(__file__).parent
 DB_PATH = Path(os.environ.get("DB_PATH", BASE_DIR / "leads.db"))
@@ -294,6 +300,265 @@ def analisar(pedido: PedidoAnalise, request: Request):
 
     analise["whatsapp_clinica"] = WHATSAPP_NUMERO
     return analise
+
+
+# =========================
+# Relatório em PDF
+# =========================
+VERDE = HexColor("#1e3a34")
+VERDE_ESC = HexColor("#142823")
+DOURADO = HexColor("#b99354")
+DOURADO_CL = HexColor("#d8bd8a")
+CREME = HexColor("#f7f3ec")
+TRILHA = HexColor("#e5dcc9")
+TEXTO = HexColor("#2b2b28")
+SUAVE = HexColor("#6b6b64")
+COR_NIVEL = {
+    "excelente": HexColor("#4a7d5f"),
+    "bom": HexColor("#b99354"),
+    "atencao": HexColor("#c98a3d"),
+    "cuidado": HexColor("#b2472f"),
+}
+TXT_NIVEL = {"excelente": "Excelente", "bom": "Bom", "atencao": "Ponto de atenção", "cuidado": "Merece cuidado"}
+TIPOS_PELE = {
+    "seca": "Tendência a pele seca", "normal": "Pele de aspecto normal",
+    "mista": "Tendência a pele mista", "oleosa": "Tendência a pele oleosa",
+    "indeterminado": "Tipo de pele a confirmar",
+}
+
+
+def _whatsapp_bonito(numero: str) -> str:
+    n = re.sub(r"\D", "", numero)
+    if len(n) == 13 and n.startswith("55"):
+        return f"+55 ({n[2:4]}) {n[4:9]}-{n[9:]}"
+    return numero
+
+
+def _texto_quebrado(c, texto, x, y, largura, fonte, tamanho, cor, entrelinha=None, max_linhas=None):
+    """Desenha texto com quebra de linha e retorna o novo y."""
+    entrelinha = entrelinha or tamanho + 3.5
+    linhas = simpleSplit(texto, fonte, tamanho, largura)
+    if max_linhas and len(linhas) > max_linhas:
+        linhas = linhas[:max_linhas]
+        linhas[-1] = linhas[-1].rstrip(".,;") + "…"
+    c.setFont(fonte, tamanho)
+    c.setFillColor(cor)
+    for linha in linhas:
+        c.drawString(x, y, linha)
+        y -= entrelinha
+    return y
+
+
+def _titulo_secao(c, texto, y):
+    c.setFont("Helvetica-Bold", 9.5)
+    c.setFillColor(DOURADO)
+    c.drawString(40, y, texto.upper())
+    c.setStrokeColor(TRILHA)
+    c.setLineWidth(0.7)
+    c.line(40, y - 6, 555, y - 6)
+    return y - 24
+
+
+def _rodape(c, pagina):
+    c.setFont("Helvetica", 7.5)
+    c.setFillColor(SUAVE)
+    c.drawCentredString(297.5, 26, "Instituto Card · Estética Avançada — institutocard.com.br")
+    c.drawRightString(555, 26, f"{pagina}/2")
+
+
+def gerar_pdf(nome: str, foto_bytes: Optional[bytes], analise: dict) -> bytes:
+    buf = io.BytesIO()
+    c = pdfcanvas.Canvas(buf, pagesize=A4)
+    W, H = A4  # 595 x 842
+
+    # ============ PÁGINA 1 ============
+    c.setFillColor(CREME)
+    c.rect(0, 0, W, H, stroke=0, fill=1)
+
+    # Cabeçalho
+    c.setFillColor(VERDE)
+    c.rect(0, H - 104, W, 104, stroke=0, fill=1)
+    c.setFillColor(DOURADO_CL)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(40, H - 34, "I N S T I T U T O   C A R D")
+    c.setFillColor(HexColor("#fffdf9"))
+    c.setFont("Times-Bold", 25)
+    c.drawString(40, H - 64, "Relatório de Análise de Pele")
+    c.setFillColor(DOURADO_CL)
+    c.setFont("Helvetica", 10)
+    data = datetime.now().strftime("%d/%m/%Y")
+    c.drawString(40, H - 86, f"Preparado para {nome}  ·  {data}")
+
+    # Foto (esquerda)
+    fx, fy, fw, fh = 40, 488, 150, 205
+    if foto_bytes:
+        try:
+            img = ImageReader(io.BytesIO(foto_bytes))
+            iw, ih = img.getSize()
+            escala = max(fw / iw, fh / ih)
+            dw, dh = iw * escala, ih * escala
+            c.saveState()
+            p = c.beginPath()
+            p.roundRect(fx, fy, fw, fh, 12)
+            c.clipPath(p, stroke=0, fill=0)
+            c.drawImage(img, fx - (dw - fw) / 2, fy - (dh - fh) / 2, dw, dh)
+            c.restoreState()
+            c.setStrokeColor(DOURADO)
+            c.setLineWidth(1.2)
+            c.roundRect(fx, fy, fw, fh, 12, stroke=1, fill=0)
+            c.setFont("Helvetica", 7.5)
+            c.setFillColor(SUAVE)
+            c.drawCentredString(fx + fw / 2, fy - 12, "Foto analisada")
+        except Exception:
+            pass
+
+    # Score (donut) + tipo de pele
+    score = max(0, min(100, int(analise.get("score_geral", 0))))
+    cx, cy, r = 280, 610, 48
+    c.setLineCap(1)
+    c.setLineWidth(9)
+    c.setStrokeColor(TRILHA)
+    c.circle(cx, cy, r, stroke=1, fill=0)
+    if score > 0:
+        p = c.beginPath()
+        p.arc(cx - r, cy - r, cx + r, cy + r, 90, -(score / 100) * 360)
+        c.setStrokeColor(DOURADO)
+        c.drawPath(p, stroke=1, fill=0)
+    c.setFillColor(VERDE)
+    c.setFont("Times-Bold", 34)
+    c.drawCentredString(cx, cy - 10, str(score))
+    c.setFont("Helvetica", 6.8)
+    c.setFillColor(SUAVE)
+    c.drawCentredString(cx, cy - 26, "SCORE DA PELE")
+
+    tipo = TIPOS_PELE.get(analise.get("tipo_pele_aparente", ""), "")
+    if tipo:
+        c.setFont("Helvetica-Bold", 9)
+        lw = c.stringWidth(tipo, "Helvetica-Bold", 9) + 24
+        px = 355 + (200 - lw) / 2 if lw < 200 else 355
+        c.setFillColor(HexColor("#ece5d8"))
+        c.roundRect(px, cy - 9, lw, 22, 11, stroke=0, fill=1)
+        c.setFillColor(VERDE)
+        c.drawCentredString(px + lw / 2, cy - 2, tipo)
+
+    # Resumo
+    resumo = analise.get("resumo", "")
+    _texto_quebrado(c, f"“{resumo}”", 220, 528, 335, "Times-Italic", 11.5, TEXTO, 15, max_linhas=4)
+
+    # Dimensões (barras)
+    y = _titulo_secao(c, "Análise detalhada", 448)
+    for d in (analise.get("dimensoes") or [])[:8]:
+        nome_d = str(d.get("nome", ""))[:40]
+        s = max(0, min(100, int(d.get("score", 0))))
+        nivel = d.get("nivel", "bom")
+        cor = COR_NIVEL.get(nivel, DOURADO)
+        c.setFont("Helvetica-Bold", 9.5)
+        c.setFillColor(TEXTO)
+        c.drawString(40, y, nome_d)
+        c.setFont("Helvetica", 8.5)
+        c.setFillColor(SUAVE)
+        c.drawRightString(555, y, f"{TXT_NIVEL.get(nivel, '')}  ·  {s}")
+        c.setFillColor(TRILHA)
+        c.roundRect(40, y - 13, 515, 6.5, 3.2, stroke=0, fill=1)
+        c.setFillColor(cor)
+        c.roundRect(40, y - 13, max(10, 515 * s / 100), 6.5, 3.2, stroke=0, fill=1)
+        obs = str(d.get("observacao", ""))
+        linhas = simpleSplit(obs, "Helvetica", 8, 515)
+        if linhas:
+            c.setFont("Helvetica", 8)
+            c.setFillColor(SUAVE)
+            c.drawString(40, y - 26, linhas[0] + ("…" if len(linhas) > 1 else ""))
+        y -= 46
+    _rodape(c, 1)
+    c.showPage()
+
+    # ============ PÁGINA 2 ============
+    c.setFillColor(CREME)
+    c.rect(0, 0, W, H, stroke=0, fill=1)
+    c.setFillColor(VERDE)
+    c.rect(0, H - 56, W, 56, stroke=0, fill=1)
+    c.setFillColor(DOURADO_CL)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(40, H - 34, "I N S T I T U T O   C A R D")
+    c.setFillColor(HexColor("#fffdf9"))
+    c.setFont("Times-Italic", 11)
+    c.drawRightString(555, H - 35, "Relatório de Análise de Pele")
+
+    y = _titulo_secao(c, "Seus pontos fortes", H - 92)
+    for p_forte in (analise.get("pontos_fortes") or [])[:4]:
+        c.setFillColor(DOURADO)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(44, y, "•")
+        y = _texto_quebrado(c, str(p_forte), 58, y, 495, "Helvetica", 9.5, TEXTO, 13, max_linhas=2) - 5
+
+    y = _titulo_secao(c, "Cuidados recomendados em casa", y - 12)
+    for i, cuidado in enumerate((analise.get("cuidados_recomendados") or [])[:5], 1):
+        c.setFillColor(DOURADO)
+        c.setFont("Helvetica-Bold", 9.5)
+        c.drawString(44, y, f"{i}.")
+        y = _texto_quebrado(c, str(cuidado), 58, y, 495, "Helvetica", 9.5, TEXTO, 13, max_linhas=2) - 5
+
+    y = _titulo_secao(c, "O que pode potencializar seus resultados", y - 12)
+    for proc in (analise.get("procedimentos_sugeridos") or [])[:4]:
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(VERDE)
+        c.drawString(44, y, str(proc.get("nome", ""))[:60])
+        y -= 13
+        y = _texto_quebrado(c, str(proc.get("para_que_serve", "")), 44, y, 510, "Helvetica", 9, SUAVE, 12.5, max_linhas=2) - 7
+
+    # Caixa de agendamento
+    box_h = 92
+    by = max(96, y - box_h - 6)
+    c.setFillColor(VERDE)
+    c.roundRect(40, by, 515, box_h, 14, stroke=0, fill=1)
+    c.setFillColor(HexColor("#fffdf9"))
+    c.setFont("Times-Bold", 15)
+    c.drawCentredString(297.5, by + box_h - 30, "Pronta para transformar essa análise em um plano real?")
+    c.setFont("Helvetica", 9.5)
+    c.setFillColor(DOURADO_CL)
+    c.drawCentredString(297.5, by + box_h - 48, "Agende uma avaliação presencial gratuita com nossas especialistas.")
+    if WHATSAPP_NUMERO:
+        c.setFont("Helvetica-Bold", 12)
+        c.setFillColor(DOURADO_CL)
+        c.drawCentredString(297.5, by + 18, f"WhatsApp: {_whatsapp_bonito(WHATSAPP_NUMERO)}")
+
+    _texto_quebrado(
+        c,
+        "Esta análise é gerada por inteligência artificial com base nas fotos enviadas e tem caráter "
+        "informativo e estético. Ela não substitui avaliação presencial nem constitui diagnóstico médico ou dermatológico.",
+        40, 62, 515, "Helvetica", 7.2, SUAVE, 9.5,
+    )
+    _rodape(c, 2)
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+class PedidoRelatorio(BaseModel):
+    nome: str
+    foto_base64: Optional[str] = None
+    analise: dict
+
+
+@app.post("/api/relatorio")
+def relatorio(pedido: PedidoRelatorio):
+    nome = pedido.nome.strip()[:120] or "Você"
+    if not isinstance(pedido.analise, dict) or "score_geral" not in pedido.analise:
+        raise HTTPException(400, "Análise inválida.")
+    foto_bytes = None
+    if pedido.foto_base64:
+        if len(pedido.foto_base64) > 7_000_000:
+            raise HTTPException(400, "Imagem muito grande.")
+        try:
+            foto_bytes = base64.b64decode(pedido.foto_base64)
+        except Exception:
+            foto_bytes = None
+    pdf = gerar_pdf(nome, foto_bytes, pedido.analise)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="analise-de-pele-instituto-card.pdf"'},
+    )
 
 
 @app.get("/api/leads.csv", response_class=PlainTextResponse)
