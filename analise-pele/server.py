@@ -210,8 +210,8 @@ Regras importantes:
 - NUNCA diagnostique doenças (melanoma, câncer, rosácea como diagnóstico, etc.). Se notar algo que mereça avaliação profissional, diga apenas de forma leve que "vale uma avaliação presencial".
 - Considere que iluminação e qualidade da foto afetam a aparência — seja moderada nas conclusões.
 - Se as fotos não mostrarem um rosto humano claramente visível, marque qualidade_foto_ok = false e explique o motivo de forma simpática.
-- Os procedimentos sugeridos devem ser genéricos de estética avançada (ex.: limpeza de pele profunda, peeling químico, microagulhamento, laser, bioestimulador de colágeno, skinbooster, radiofrequência) — sem prometer resultados.
-- Não mencione marcas de produtos."""
+- Os procedimentos sugeridos devem ser de estética avançada oferecidos pela clínica (ex.: limpeza de pele profunda, Laser Lavieen para manchas e rejuvenescimento, microagulhamento, bioestimulador de colágeno, skinbooster, radiofrequência) — sem prometer resultados. Dê preferência ao Laser Lavieen quando houver manchas, textura irregular ou fotoenvelhecimento.
+- Não mencione marcas de produtos de skincare (o Laser Lavieen, equipamento da clínica, pode e deve ser citado)."""
 
 
 def analisar_com_claude(fotos: List[Foto]) -> dict:
@@ -366,6 +366,71 @@ def _rodape(c, pagina):
     c.drawRightString(555, 26, f"{pagina}/2")
 
 
+ROTULO_CURTO = {
+    "Linhas e rugas": "Linhas", "Manchas e uniformidade": "Manchas", "Textura": "Textura",
+    "Poros": "Poros", "Oleosidade aparente": "Oleosidade", "Hidratação aparente": "Hidratação",
+    "Olheiras e área dos olhos": "Olhos", "Firmeza": "Firmeza",
+}
+
+
+def _radar(c, dimensoes, cx, cy, r):
+    """Gráfico de radar octogonal com os scores das dimensões."""
+    import math
+
+    n = len(dimensoes)
+    if n < 3:
+        return
+
+    def ponto(i, raio):
+        # eixo Y do PDF cresce para cima — sinal invertido para a 1ª dimensão ficar no topo
+        ang = -math.pi / 2 + (2 * math.pi * i) / n
+        return cx + raio * math.cos(ang), cy - raio * math.sin(ang)
+
+    def poligono(pontos, stroke, fill=0):
+        p = c.beginPath()
+        p.moveTo(*pontos[0])
+        for pt in pontos[1:]:
+            p.lineTo(*pt)
+        p.close()
+        c.drawPath(p, stroke=stroke, fill=fill)
+
+    # anéis de referência e raios
+    c.setLineWidth(0.7)
+    c.setStrokeColor(HexColor("#ddd3e3"))
+    for frac in (0.25, 0.5, 0.75, 1.0):
+        poligono([ponto(i, r * frac) for i in range(n)], stroke=1)
+    for i in range(n):
+        x, y = ponto(i, r)
+        c.line(cx, cy, x, y)
+
+    # polígono dos dados (preenchimento translúcido)
+    dados = [ponto(i, r * max(8, min(100, int(d.get("score", 0)))) / 100) for i, d in enumerate(dimensoes)]
+    c.saveState()
+    c.setFillColor(DOURADO)
+    c.setFillAlpha(0.25)
+    c.setStrokeColor(DOURADO)
+    c.setLineWidth(1.8)
+    c.setLineJoin(1)
+    poligono(dados, stroke=1, fill=1)
+    c.restoreState()
+    c.setFillColor(DOURADO)
+    for x, y in dados:
+        c.circle(x, y, 2.6, stroke=0, fill=1)
+
+    # rótulos
+    c.setFont("Helvetica", 8.5)
+    c.setFillColor(SUAVE)
+    for i, d in enumerate(dimensoes):
+        x, y = ponto(i, r + 16)
+        rotulo = ROTULO_CURTO.get(d.get("nome", ""), str(d.get("nome", "")).split(" ")[0])
+        if abs(x - cx) < 8:
+            c.drawCentredString(x, y if y > cy else y - 8, rotulo)
+        elif x > cx:
+            c.drawString(x, y - 3, rotulo)
+        else:
+            c.drawRightString(x, y - 3, rotulo)
+
+
 def gerar_pdf(nome: str, foto_bytes: Optional[bytes], analise: dict) -> bytes:
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=A4)
@@ -489,27 +554,31 @@ def gerar_pdf(nome: str, foto_bytes: Optional[bytes], analise: dict) -> bytes:
     c.setFont("Times-Italic", 11)
     c.drawRightString(555, H - 35, "Relatório de Análise de Pele")
 
-    y = _titulo_secao(c, "Seus pontos fortes", H - 92)
-    for p_forte in (analise.get("pontos_fortes") or [])[:4]:
+    y = _titulo_secao(c, "Mapa da sua pele", H - 92)
+    _radar(c, (analise.get("dimensoes") or [])[:8], 297.5, y - 90, 72)
+    y -= 200
+
+    y = _titulo_secao(c, "Seus pontos fortes", y)
+    for p_forte in (analise.get("pontos_fortes") or [])[:3]:
         c.setFillColor(DOURADO)
         c.setFont("Helvetica-Bold", 10)
         c.drawString(44, y, "•")
-        y = _texto_quebrado(c, str(p_forte), 58, y, 495, "Helvetica", 9.5, TEXTO, 13, max_linhas=2) - 5
+        y = _texto_quebrado(c, str(p_forte), 58, y, 495, "Helvetica", 9.5, TEXTO, 13, max_linhas=1) - 5
 
-    y = _titulo_secao(c, "Cuidados recomendados em casa", y - 12)
-    for i, cuidado in enumerate((analise.get("cuidados_recomendados") or [])[:5], 1):
+    y = _titulo_secao(c, "Cuidados recomendados em casa", y - 10)
+    for i, cuidado in enumerate((analise.get("cuidados_recomendados") or [])[:4], 1):
         c.setFillColor(DOURADO)
         c.setFont("Helvetica-Bold", 9.5)
         c.drawString(44, y, f"{i}.")
-        y = _texto_quebrado(c, str(cuidado), 58, y, 495, "Helvetica", 9.5, TEXTO, 13, max_linhas=2) - 5
+        y = _texto_quebrado(c, str(cuidado), 58, y, 495, "Helvetica", 9.5, TEXTO, 13, max_linhas=1) - 5
 
-    y = _titulo_secao(c, "O que pode potencializar seus resultados", y - 12)
-    for proc in (analise.get("procedimentos_sugeridos") or [])[:4]:
+    y = _titulo_secao(c, "O que pode potencializar seus resultados", y - 10)
+    for proc in (analise.get("procedimentos_sugeridos") or [])[:3]:
         c.setFont("Helvetica-Bold", 10)
         c.setFillColor(VERDE)
         c.drawString(44, y, str(proc.get("nome", ""))[:60])
         y -= 13
-        y = _texto_quebrado(c, str(proc.get("para_que_serve", "")), 44, y, 510, "Helvetica", 9, SUAVE, 12.5, max_linhas=2) - 7
+        y = _texto_quebrado(c, str(proc.get("para_que_serve", "")), 44, y, 510, "Helvetica", 9, SUAVE, 12.5, max_linhas=1) - 7
 
     # Caixa de agendamento
     box_h = 92
