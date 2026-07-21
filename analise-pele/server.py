@@ -1,5 +1,5 @@
 # =========================
-# Análise de Pele IA — Instituto Card
+# Análise de Pele IA — Instituto Cardo
 # Backend FastAPI + Claude API (visão computacional)
 # =========================
 from __future__ import annotations
@@ -33,7 +33,7 @@ WHATSAPP_NUMERO = os.environ.get("WHATSAPP_NUMERO", "")  # ex: 5511999999999
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 MAX_ANALISES_POR_IP_HORA = int(os.environ.get("MAX_ANALISES_POR_IP_HORA", "6"))
 
-app = FastAPI(title="Análise de Pele IA — Instituto Card")
+app = FastAPI(title="Análise de Pele IA — Instituto Cardo")
 
 # Cliente criado sob demanda: se a ANTHROPIC_API_KEY faltar, o site continua
 # no ar e o erro aparece apenas (e claramente) na hora da análise.
@@ -190,7 +190,7 @@ ANALISE_SCHEMA = {
     "additionalProperties": False,
 }
 
-SYSTEM_PROMPT = """Você é a assistente de análise de pele do Instituto Card, uma clínica de estética avançada brasileira.
+SYSTEM_PROMPT = """Você é a assistente de análise de pele do Instituto Cardo, uma clínica de estética avançada brasileira.
 
 Sua tarefa: analisar fotos do rosto enviadas pela pessoa e produzir uma avaliação ESTÉTICA (não médica) da pele, em português do Brasil, com tom acolhedor, positivo e profissional — como uma esteticista experiente conversando com uma cliente.
 
@@ -305,17 +305,17 @@ def analisar(pedido: PedidoAnalise, request: Request):
 # =========================
 # Relatório em PDF
 # =========================
-VERDE = HexColor("#1e3a34")
-VERDE_ESC = HexColor("#142823")
-DOURADO = HexColor("#b99354")
-DOURADO_CL = HexColor("#d8bd8a")
-CREME = HexColor("#f7f3ec")
-TRILHA = HexColor("#e5dcc9")
-TEXTO = HexColor("#2b2b28")
-SUAVE = HexColor("#6b6b64")
+VERDE = HexColor("#333134")
+VERDE_ESC = HexColor("#232124")
+DOURADO = HexColor("#8d6a97")
+DOURADO_CL = HexColor("#c5aed0")
+CREME = HexColor("#faf8f5")
+TRILHA = HexColor("#e9e4ee")
+TEXTO = HexColor("#39363b")
+SUAVE = HexColor("#7a7580")
 COR_NIVEL = {
-    "excelente": HexColor("#4a7d5f"),
-    "bom": HexColor("#b99354"),
+    "excelente": HexColor("#71865a"),
+    "bom": HexColor("#8d6a97"),
     "atencao": HexColor("#c98a3d"),
     "cuidado": HexColor("#b2472f"),
 }
@@ -362,7 +362,7 @@ def _titulo_secao(c, texto, y):
 def _rodape(c, pagina):
     c.setFont("Helvetica", 7.5)
     c.setFillColor(SUAVE)
-    c.drawCentredString(297.5, 26, "Instituto Card · Estética Avançada — institutocard.com.br")
+    c.drawCentredString(297.5, 26, "Instituto Cardo · Aesthetic — institutocardo.com.br")
     c.drawRightString(555, 26, f"{pagina}/2")
 
 
@@ -378,10 +378,13 @@ def gerar_pdf(nome: str, foto_bytes: Optional[bytes], analise: dict) -> bytes:
     # Cabeçalho
     c.setFillColor(VERDE)
     c.rect(0, H - 104, W, 104, stroke=0, fill=1)
+    flor = BASE_DIR / "static" / "flor-branca.png"
+    if flor.exists():
+        c.drawImage(str(flor), 500, H - 92, width=52, height=62, mask="auto", preserveAspectRatio=True)
     c.setFillColor(DOURADO_CL)
     c.setFont("Helvetica-Bold", 8.5)
-    c.drawString(40, H - 34, "I N S T I T U T O   C A R D")
-    c.setFillColor(HexColor("#fffdf9"))
+    c.drawString(40, H - 34, "I N S T I T U T O   C A R D O   ·   A E S T H E T I C")
+    c.setFillColor(HexColor("#ffffff"))
     c.setFont("Times-Bold", 25)
     c.drawString(40, H - 64, "Relatório de Análise de Pele")
     c.setFillColor(DOURADO_CL)
@@ -436,7 +439,7 @@ def gerar_pdf(nome: str, foto_bytes: Optional[bytes], analise: dict) -> bytes:
         c.setFont("Helvetica-Bold", 9)
         lw = c.stringWidth(tipo, "Helvetica-Bold", 9) + 24
         px = 355 + (200 - lw) / 2 if lw < 200 else 355
-        c.setFillColor(HexColor("#ece5d8"))
+        c.setFillColor(HexColor("#ece6f0"))
         c.roundRect(px, cy - 9, lw, 22, 11, stroke=0, fill=1)
         c.setFillColor(VERDE)
         c.drawCentredString(px + lw / 2, cy - 2, tipo)
@@ -477,10 +480,12 @@ def gerar_pdf(nome: str, foto_bytes: Optional[bytes], analise: dict) -> bytes:
     c.rect(0, 0, W, H, stroke=0, fill=1)
     c.setFillColor(VERDE)
     c.rect(0, H - 56, W, 56, stroke=0, fill=1)
+    if flor.exists():
+        c.drawImage(str(flor), 297.5 - 14, H - 48, width=28, height=33, mask="auto", preserveAspectRatio=True)
     c.setFillColor(DOURADO_CL)
     c.setFont("Helvetica-Bold", 8)
-    c.drawString(40, H - 34, "I N S T I T U T O   C A R D")
-    c.setFillColor(HexColor("#fffdf9"))
+    c.drawString(40, H - 34, "I N S T I T U T O   C A R D O")
+    c.setFillColor(HexColor("#ffffff"))
     c.setFont("Times-Italic", 11)
     c.drawRightString(555, H - 35, "Relatório de Análise de Pele")
 
@@ -511,7 +516,7 @@ def gerar_pdf(nome: str, foto_bytes: Optional[bytes], analise: dict) -> bytes:
     by = max(96, y - box_h - 6)
     c.setFillColor(VERDE)
     c.roundRect(40, by, 515, box_h, 14, stroke=0, fill=1)
-    c.setFillColor(HexColor("#fffdf9"))
+    c.setFillColor(HexColor("#ffffff"))
     c.setFont("Times-Bold", 15)
     c.drawCentredString(297.5, by + box_h - 30, "Pronta para transformar essa análise em um plano real?")
     c.setFont("Helvetica", 9.5)
@@ -557,7 +562,7 @@ def relatorio(pedido: PedidoRelatorio):
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="analise-de-pele-instituto-card.pdf"'},
+        headers={"Content-Disposition": 'attachment; filename="analise-de-pele-instituto-cardo.pdf"'},
     )
 
 
